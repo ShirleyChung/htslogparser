@@ -7,7 +7,6 @@ pub struct Rec {
 	len : usize,
 }
 
-#[allow(dead_code)]
 fn init_header() -> LinkedList<Rec> {
 	let mut lst = LinkedList::<Rec>::new();
 	lst.push_back(Rec{ name: "ESC",      len: 1 });
@@ -16,7 +15,6 @@ fn init_header() -> LinkedList<Rec> {
 	lst
 }
 
-#[allow(dead_code)]
 fn init_ord_rpt_format() -> LinkedList<Rec> {
 	let mut lst = LinkedList::<Rec>::new();
 	lst.append(&mut init_header());
@@ -64,7 +62,6 @@ fn init_ord_rpt_format() -> LinkedList<Rec> {
 	lst
 }
 
-#[allow(dead_code)]
 fn init_deal_rpt_format() -> LinkedList<Rec> {
 	let mut lst = LinkedList::<Rec>::new();
 	lst.append(&mut init_header());
@@ -126,17 +123,19 @@ fn struct_len(lst: &LinkedList<Rec>) -> usize {
 
 /* Parser本體宣告, 內含HTS Log欄位結構的LinkList */
 pub struct Parser {
-	hts_ord_rpt_format   : LinkedList<Rec>,
-	hts_deal_rpt_format  : LinkedList<Rec>,
+	hts_ord_rpt_format   : LinkedList<Rec>, // 委託回報格式
+	hts_deal_rpt_format  : LinkedList<Rec>, // 成交回報格式
+	replace : bool, // 是否取代空白
 }
 
 /* Parser方法實作 */
 impl Parser {
 	// 初始化
-	pub fn new() -> Parser {
+	pub fn new(r: bool) -> Parser {
 		Parser{ 
 			hts_ord_rpt_format   : init_ord_rpt_format(),
 			hts_deal_rpt_format  : init_deal_rpt_format(),
+			replace : r,
 		}
 	}
 	// 從log line的標頭來檢查版本，以便使用符合的電文格式
@@ -164,7 +163,9 @@ impl Parser {
 		for recfmt in fmtlist {
 			end_pos = end_pos + recfmt.len;
 			if end_pos > linelen { break; }
-			println!("{}={}", recfmt.name, &line[beg_pos..end_pos]);
+			let value = if self.replace { str::replace(&line[beg_pos..end_pos], " ", "_") }
+				        else { (&line[beg_pos..end_pos]).to_string() };
+			println!("{s:<w$}  =   [{v}]", s = recfmt.name, w = 15, v = value);
 			beg_pos = end_pos;
 		}
 	}
