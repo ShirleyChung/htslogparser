@@ -1,4 +1,5 @@
 use std::collections::LinkedList;
+use std::collections::HashMap;
 use std::num::ParseIntError;
 
 /* 每個欄位的名稱及其長度 */
@@ -12,13 +13,13 @@ fn init_header() -> LinkedList<Rec> {
 	lst.push_back(Rec{ name: "ESC",      len: 1 });
 	lst.push_back(Rec{ name: "Ver",      len: 4 });
 	lst.push_back(Rec{ name: "Fmt",      len: 4 });	
+	lst.push_back(Rec{ name: "RptSeq",   len: 8 });
 	lst
 }
 
 fn init_ord_rpt_format() -> LinkedList<Rec> {
 	let mut lst = LinkedList::<Rec>::new();
 	lst.append(&mut init_header());
-	lst.push_back(Rec{ name: "RptSeq",   len: 8 });
 	lst.push_back(Rec{ name: "BrkNo",    len: 7 });
 	lst.push_back(Rec{ name: "IvacNo",   len: 7 });
 	lst.push_back(Rec{ name: "DstBrkNo", len: 7 });
@@ -65,7 +66,6 @@ fn init_ord_rpt_format() -> LinkedList<Rec> {
 fn init_deal_rpt_format() -> LinkedList<Rec> {
 	let mut lst = LinkedList::<Rec>::new();
 	lst.append(&mut init_header());
-    lst.push_back(Rec{ name: "RptSeq", len: 8 });
     lst.push_back(Rec{ name: "BrkNo", len: 7 });
     lst.push_back(Rec{ name: "IvacNo", len: 7 });
     lst.push_back(Rec{ name: "OrdNo", len: 20 });
@@ -121,11 +121,32 @@ fn struct_len(lst: &LinkedList<Rec>) -> usize {
 	sz
 }
 
+struct FmtData {
+	fmtlst    : LinkedList<Rec>,
+	key_index : HashMap<String, usize>,
+}
+
+impl FmtData {
+	pub fn new(lst: LinkedList<Rec>) -> FmtData {
+		let mut dat = FmtData {
+			fmtlst    : lst,
+			key_index : HashMap::<String, usize>::new(),
+		};
+		let mut idx = 0;
+		for rec in &dat.fmtlst {
+			dat.key_index.insert(rec.name.to_string(), idx);
+			idx = idx + 1;
+		}
+		dat
+	}
+}
+
 /* Parser本體宣告, 內含HTS Log欄位結構的LinkList */
 pub struct Parser {
-	hts_ord_rpt_format   : LinkedList<Rec>, // 委託回報格式
-	hts_deal_rpt_format  : LinkedList<Rec>, // 成交回報格式
 	replace : bool, // 是否取代空白
+	hts_ord_rpt_format   : FmtData,
+	hts_deal_rpt_format  : FmtData,
+	data_set  : HashMap<usize, Vec<String>>,
 }
 
 /* Parser方法實作 */
@@ -133,9 +154,10 @@ impl Parser {
 	// 初始化
 	pub fn new(r: bool) -> Parser {
 		Parser{ 
-			hts_ord_rpt_format   : init_ord_rpt_format(),
-			hts_deal_rpt_format  : init_deal_rpt_format(),
 			replace : r,
+			hts_ord_rpt_format   : FmtData::new(init_ord_rpt_format()),
+			hts_deal_rpt_format  : FmtData::new(init_deal_rpt_format()),
+			data_set  : HashMap::<usize, Vec<String>>::new(),
 		}
 	}
 	// 從log line的標頭來檢查版本，以便使用符合的電文格式
@@ -155,31 +177,64 @@ impl Parser {
 			Ok(0)
 		}
 	}
-	// 列出欄位 = 值
-	pub fn show_list(&self, line: &str, fmtlist: &LinkedList<Rec>) {
+	// 取得GW序號
+	pub fn get_gw_seq(&self, line: &str) -> Result<usize, ParseIntError> {
+		if line.len() > 18 {
+			Ok(line[10..8].parse::<usize>()?)
+		} else {
+			Ok(0)
+		}
+	}
+	// 以委回格式解析log並將資料輸入到dataset中
+	pub fn parse_by_ordlist(&mut self, line: &str) {
 		let mut beg_pos :usize = 0;
 		let mut end_pos :usize = 0;
 		let linelen = line.len();
-		for recfmt in fmtlist {
+		let mut recs = Vec::<String>::new();
+		for recfmt in &self.hts_ord_rpt_format.fmtlst {
 			end_pos = end_pos + recfmt.len;
 			if end_pos > linelen { break; }
+/*
 			let value = if self.replace { str::replace(&line[beg_pos..end_pos], " ", "_") }
 				        else { (&line[beg_pos..end_pos]).to_string() };
-			println!("{s:<w$}  =   [{v}]", s = recfmt.name, w = 15, v = value);
+			format("{s:<w$}  =   [{v}]", s = recfmt.name, w = 15, v = value);
+*/
+			let tok: &str = &line[beg_pos..end_pos];
+			recs.push(tok.to_string());
 			beg_pos = end_pos;
+		}
+		if let Ok(gwseq) = self.get_gw_seq(line) {
+			self.data_set.insert(gwseq, recs);
+		}
+	}
+	// 以成回格式解析log並將資料輸入到dataset中
+	pub fn parse_by_dealist(&mut self, line: &str) {
+		let mut beg_pos :usize = 0;
+		let mut end_pos :usize = 0;
+		let linelen = line.len();
+		let mut recs = Vec::<String>::new();
+		for recfmt in &self.hts_deal_rpt_format.fmtlst {
+			end_pos = end_pos + recfmt.len;
+			if end_pos > linelen { break; }
+			let tok: &str = &line[beg_pos..end_pos];
+			recs.push(tok.to_string());
+			beg_pos = end_pos;
+		}
+		if let Ok(gwseq) = self.get_gw_seq(line) {
+			self.data_set.insert(gwseq, recs);
 		}
 	}
 	// 輸入一行log
-	pub fn parse_line(&self, line: &str) {
-		println!("\n======Origin======\n{}:\n======Parsed======", line);
+	pub fn parse_line(&mut self, line: &str) {
+//		println!("\n======Origin======\n{}:\n======Parsed======", line);
 		if let Ok(format) = self.check_format(line) {
 			match format {
-				1011 => self.show_list(line, &self.hts_ord_rpt_format),
-				1021 => self.show_list(line, &self.hts_deal_rpt_format),
+				1011 => self.parse_by_ordlist(line),
+				1021 => self.parse_by_dealist(line),
 				9001 => (),
 				9002 => (),
 				_ => println!("unknown format!"),
-			}
+			};
 		}
 	}
 	// 取得欄位名稱
