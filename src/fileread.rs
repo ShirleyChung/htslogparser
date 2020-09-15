@@ -73,4 +73,5 @@ pub fn read_data_log<R: Read>(reader: &mut BufReader<R>, parser: &mut Parser, en
 			LineType::EndOfFile =>  break,
 		};
 	};
+	parser.show_summary();
 }

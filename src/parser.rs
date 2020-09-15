@@ -124,13 +124,16 @@ fn struct_len(lst: &LinkedList<Rec>) -> usize {
 struct FmtData {
 	fmtlst    : LinkedList<Rec>,
 	key_index : HashMap<String, usize>,
+	data_set  : HashMap<usize, Vec<String>>,
 }
 
 impl FmtData {
+	// 建構資料
 	pub fn new(lst: LinkedList<Rec>) -> FmtData {
 		let mut dat = FmtData {
 			fmtlst    : lst,
 			key_index : HashMap::<String, usize>::new(),
+			data_set  : HashMap::<usize, Vec<String>>::new(),
 		};
 		let mut idx = 0;
 		for rec in &dat.fmtlst {
@@ -139,14 +142,37 @@ impl FmtData {
 		}
 		dat
 	}
+	// 搜尋結果
+	pub fn search_by_index(&self, index: usize, val: &str) {
+		for (gwseq, rec) in &self.data_set {
+			if rec.len() > index {
+				if rec[index] == val {
+					self.print_rec(gwseq);
+				}
+			}
+		}
+	}
+	// 印出結果
+	pub fn print_rec(&self, gwseq: &usize) {
+		let mut idx : usize = 0;
+		if let Some(rec) = self.data_set.get(gwseq) {
+			let reclen = rec.len();
+			for fmtrec in &self.fmtlst {
+				if idx >= reclen { break; }
+				if rec[idx] == "\x1B" { idx = idx + 1; continue; }
+				println!("{s:<w$}  =   [{v}]", s = fmtrec.name, w = 15, v = rec[idx]);
+				//println!("{} = {}", fmtrec.name, rec[idx]);
+				idx = idx + 1;
+			}
+		}
+	}
 }
 
 /* Parser本體宣告, 內含HTS Log欄位結構的LinkList */
 pub struct Parser {
 	replace : bool, // 是否取代空白
-	hts_ord_rpt_format   : FmtData,
-	hts_deal_rpt_format  : FmtData,
-	data_set  : HashMap<usize, Vec<String>>,
+	hts_ord_rpts   : FmtData,
+	hts_deal_rpts  : FmtData,
 }
 
 /* Parser方法實作 */
@@ -155,9 +181,8 @@ impl Parser {
 	pub fn new(r: bool) -> Parser {
 		Parser{ 
 			replace : r,
-			hts_ord_rpt_format   : FmtData::new(init_ord_rpt_format()),
-			hts_deal_rpt_format  : FmtData::new(init_deal_rpt_format()),
-			data_set  : HashMap::<usize, Vec<String>>::new(),
+			hts_ord_rpts   : FmtData::new(init_ord_rpt_format()),
+			hts_deal_rpts  : FmtData::new(init_deal_rpt_format()),
 		}
 	}
 	// 從log line的標頭來檢查版本，以便使用符合的電文格式
@@ -178,9 +203,10 @@ impl Parser {
 		}
 	}
 	// 取得GW序號
+	#[allow(dead_code)]
 	pub fn get_gw_seq(&self, line: &str) -> Result<usize, ParseIntError> {
 		if line.len() > 18 {
-			Ok(line[10..8].parse::<usize>()?)
+			Ok(line[10..18].parse::<usize>()?)
 		} else {
 			Ok(0)
 		}
@@ -191,20 +217,19 @@ impl Parser {
 		let mut end_pos :usize = 0;
 		let linelen = line.len();
 		let mut recs = Vec::<String>::new();
-		for recfmt in &self.hts_ord_rpt_format.fmtlst {
+		for recfmt in &self.hts_ord_rpts.fmtlst {
 			end_pos = end_pos + recfmt.len;
 			if end_pos > linelen { break; }
-/*
-			let value = if self.replace { str::replace(&line[beg_pos..end_pos], " ", "_") }
-				        else { (&line[beg_pos..end_pos]).to_string() };
-			format("{s:<w$}  =   [{v}]", s = recfmt.name, w = 15, v = value);
-*/
-			let tok: &str = &line[beg_pos..end_pos];
-			recs.push(tok.to_string());
+
+			let tok = &line[beg_pos..end_pos].trim();
+			let value = if self.replace { str::replace(tok, " ", "_") }
+				        else { tok.to_string() };
+						
+			recs.push(value);
 			beg_pos = end_pos;
 		}
 		if let Ok(gwseq) = self.get_gw_seq(line) {
-			self.data_set.insert(gwseq, recs);
+			self.hts_ord_rpts.data_set.insert(gwseq, recs);
 		}
 	}
 	// 以成回格式解析log並將資料輸入到dataset中
@@ -213,15 +238,15 @@ impl Parser {
 		let mut end_pos :usize = 0;
 		let linelen = line.len();
 		let mut recs = Vec::<String>::new();
-		for recfmt in &self.hts_deal_rpt_format.fmtlst {
+		for recfmt in &self.hts_deal_rpts.fmtlst {
 			end_pos = end_pos + recfmt.len;
 			if end_pos > linelen { break; }
-			let tok: &str = &line[beg_pos..end_pos];
+			let tok: &str = &line[beg_pos..end_pos].trim();
 			recs.push(tok.to_string());
 			beg_pos = end_pos;
 		}
 		if let Ok(gwseq) = self.get_gw_seq(line) {
-			self.data_set.insert(gwseq, recs);
+			self.hts_deal_rpts.data_set.insert(gwseq, recs);
 		}
 	}
 	// 輸入一行log
@@ -237,9 +262,40 @@ impl Parser {
 			};
 		}
 	}
-	// 取得欄位名稱
-	#[allow(dead_code)]
-	pub fn get_field_names() -> &'static str {
-		""
+	// 印出解析結果摘要
+	pub fn show_summary(&self) {
+		println!("total {} lines parsed. {} order reports and {} deal reports", 
+		self.hts_ord_rpts.data_set.len() + self.hts_deal_rpts.data_set.len(),
+		self.hts_ord_rpts.data_set.len(),
+		self.hts_deal_rpts.data_set.len()
+		);
+		println!("you can search with following keys:");
+		for n in &self.hts_ord_rpts.fmtlst {
+			print!("{},", n.name);
+		}
+		println!("\n==");
+		for n in &self.hts_deal_rpts.fmtlst {
+			print!("{},", n.name);
+		}
+		println!("\n==");
 	}
+	// 搜尋目標: 欄位名稱:值
+	#[allow(dead_code)]
+	pub fn find_by(&self, target: &str) {
+		let toks = target.split(':').collect::<Vec<&str>>();
+		if toks.len() >1 {
+			let key = toks[0].trim();
+			let val = toks[1].trim();
+			match self.hts_ord_rpts.key_index.get(key) {
+				Some(index) => self.hts_ord_rpts.search_by_index(*index, &val),
+				_ => (),
+			};
+			match self.hts_deal_rpts.key_index.get(key) {
+				Some(index) => self.hts_deal_rpts.search_by_index(*index, &val),
+				_ => (),
+			};			
+		} else {
+			println!("{} format wrong, pls specify 'key':'value'", target);		
+		}
+	}	
 }

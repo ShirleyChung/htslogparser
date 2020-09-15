@@ -14,8 +14,11 @@ use crate::parser::*;
 // 1.參數取得
 #[derive(StructOpt)]
 struct Options {
-	/// 要解析的HtsT.log
-	filepath: String, // Log檔路徑
+	/// 要解析的HtsT.log路徑
+	filepath: String, 
+	/// 搜尋目標: 欄位名稱:值
+	#[structopt(short="f", long="findby", default_value = "")]
+	target: String,
 	/// SorReqOrd.log 檔案編碼格式, 預設BIG5
 	#[structopt(short="e", long="encoding", default_value = "BIG5")]
 	encoding: String,
@@ -33,5 +36,9 @@ fn main() -> Result<()> {
 	
 	// 依每行解析
 	read_data_log(&mut reader, &mut parser, &options.encoding);
+	// 搜尋目標
+	if !&options.target.is_empty() {
+		parser.find_by(&options.target);
+	}
 	Ok(())
 }
